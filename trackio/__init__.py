@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import shutil
+import signal
+import threading
 import warnings
 import webbrowser
 from pathlib import Path
@@ -133,6 +135,23 @@ config = {}
 _atexit_registered = False
 _spaces_created_this_session: set[str] = set()
 _projects_notified_auto_log_hw: set[str] = set()
+
+
+def _handle_sigterm(signum, frame):
+    # Turn SIGTERM into a normal interpreter exit so atexit handlers
+    # (run.finish(): console capture, queued logs) still run.
+    raise SystemExit(128 + signum)
+
+
+def _install_sigterm_handler():
+    if threading.current_thread() is not threading.main_thread():
+        return
+    try:
+        if signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL:
+            return  # never override a handler set by the user or a framework
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except (ValueError, OSError):
+        pass
 
 
 def _cleanup_current_run():
@@ -696,6 +715,7 @@ def init(
     global _atexit_registered
     if not _atexit_registered:
         atexit.register(_cleanup_current_run)
+        _install_sigterm_handler()
         _atexit_registered = True
 
     if resumed:
